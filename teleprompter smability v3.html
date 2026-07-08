@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>Teleprompter · Smability</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+  :root{
+    --bg:#000000;
+    --panel:#0A0A0B;
+    --ink:#FFFFFF;
+    --ink-dim:#9AA0A8;
+    --cue:#6E7276;
+    --line:rgba(255,255,255,.07);
+    --rain:#38BDF8;   /* CHAAK · lluvia */
+    --air:#34D399;    /* SMAA · aire */
+    --warn:#FBBF24;
+    --alert:#F87171;
+    --band:rgba(56,189,248,.10);
+    --fs:34px;        /* tamaño de lectura, controlado por JS */
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{
+    background:var(--bg);
+    color:var(--ink);
+    font-family:"Hanken Grotesk",system-ui,-apple-system,sans-serif;
+    display:flex;flex-direction:column;
+    height:100dvh;overflow:hidden;
+    -webkit-font-smoothing:antialiased;
+  }
+  .mono{font-family:"IBM Plex Mono",ui-monospace,monospace}
+
+  /* ---------- HUD superior ---------- */
+  .hud{
+    flex:0 0 auto;
+    display:flex;align-items:center;gap:18px;
+    padding:12px 18px;
+    border-bottom:1px solid var(--line);
+    background:linear-gradient(180deg,rgba(56,189,248,.05),transparent);
+    z-index:5;
+  }
+  .brand{display:flex;align-items:center;gap:9px;letter-spacing:.14em;
+    font-size:11px;font-weight:600;text-transform:uppercase;color:var(--ink-dim)}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--air);
+    box-shadow:0 0 10px var(--air)}
+  .brand b{color:var(--ink);font-weight:600}
+  .hud-spacer{flex:1}
+  .metric{display:flex;flex-direction:column;align-items:flex-end;line-height:1}
+  .metric .k{font-size:9px;letter-spacing:.16em;text-transform:uppercase;color:var(--cue);margin-bottom:5px}
+  .metric .v{font-size:19px;font-weight:600;font-variant-numeric:tabular-nums}
+  .metric.est .v{color:var(--air)}
+  .metric.est.warn .v{color:var(--warn)}
+  .metric.est.over .v{color:var(--alert)}
+
+  /* ---------- Escenario de lectura ---------- */
+  .stage{position:relative;flex:1;overflow:hidden}
+  .scroll{
+    position:absolute;inset:0;overflow-y:auto;overflow-x:hidden;
+    padding:42vh 6vw 62vh;
+    scrollbar-width:none;
+    will-change:scroll-position;
+  }
+  .scroll::-webkit-scrollbar{display:none}
+  .scroll.mirror{transform:scaleX(-1)}
+
+  .block{max-width:22ch;margin:0 auto 12vh;text-align:center}
+  .block:last-child{margin-bottom:0}
+  .tag{
+    display:inline-flex;align-items:center;gap:8px;
+    margin-bottom:14px;padding:5px 11px;border-radius:100px;
+    border:1px solid var(--line);
+    font-size:11px;letter-spacing:.06em;color:var(--ink-dim);
+    text-transform:uppercase;font-weight:500;
+  }
+  .tag .tdot{width:7px;height:7px;border-radius:50%;background:var(--air)}
+  .tag time{color:var(--ink);font-weight:600}
+  .cue{
+    font-size:12px;letter-spacing:.05em;color:var(--cue);
+    text-transform:uppercase;line-height:1.5;margin-bottom:20px;
+    font-weight:500;
+  }
+  .cue::before{content:"◧  ";color:var(--rain)}
+  body.hide-cues .cue{display:none}
+  .line{
+    font-size:var(--fs);line-height:1.42;font-weight:600;
+    letter-spacing:-.005em;color:var(--ink);
+  }
+
+  /* ---------- Banda de lectura + degradados ---------- */
+  .band,.fade{position:absolute;left:0;right:0;pointer-events:none;z-index:3}
+  .band{
+    top:40%;height:calc(var(--fs) * 1.9);transform:translateY(-50%);
+    background:var(--band);
+    border-top:1px solid rgba(56,189,248,.42);
+    border-bottom:1px solid rgba(56,189,248,.42);
+  }
+  .band::before,.band::after{
+    content:"";position:absolute;top:50%;width:12px;height:12px;
+    border:2px solid var(--rain);transform:translateY(-50%);opacity:.7;
+  }
+  .band::before{left:14px;border-right:0;border-top:0}
+  .band::after{right:14px;border-left:0;border-bottom:0}
+  .fade{height:34%}
+  .fade.top{top:0;background:linear-gradient(var(--bg) 12%,transparent)}
+  .fade.bot{bottom:0;background:linear-gradient(transparent,var(--bg) 88%)}
+
+  /* barra de progreso */
+  .progress{position:absolute;left:0;bottom:0;height:2px;width:0;
+    background:linear-gradient(90deg,var(--air),var(--rain));z-index:4;
+    transition:width .1s linear}
+
+  /* ---------- Controles ---------- */
+  .controls{
+    flex:0 0 auto;display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+    padding:12px 16px;border-top:1px solid var(--line);
+    background:var(--panel);z-index:5;
+  }
+  button{
+    font-family:inherit;color:var(--ink);background:#16223A;
+    border:1px solid var(--line);border-radius:10px;cursor:pointer;
+    padding:10px 14px;font-size:13px;font-weight:500;
+    display:inline-flex;align-items:center;gap:7px;
+    transition:background .15s,border-color .15s,transform .05s;
+  }
+  button:hover{background:#1D2C49;border-color:rgba(56,189,248,.35)}
+  button:active{transform:translateY(1px)}
+  button.on{background:rgba(56,189,248,.16);border-color:var(--rain);color:#CDEBFB}
+  button:focus-visible{outline:2px solid var(--rain);outline-offset:2px}
+  .play{background:var(--rain);color:#04141F;border-color:transparent;font-weight:700;min-width:120px;justify-content:center}
+  .play:hover{background:#5CCBF5}
+  .play.playing{background:#16223A;color:var(--ink);font-weight:600}
+
+  .ctl{display:flex;align-items:center;gap:9px;padding:7px 12px;
+    background:#0C1424;border:1px solid var(--line);border-radius:10px}
+  .ctl label{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--cue);font-weight:600}
+  input[type=range]{-webkit-appearance:none;appearance:none;width:104px;height:3px;
+    background:#2A3A57;border-radius:3px;outline:none}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:15px;height:15px;
+    border-radius:50%;background:var(--rain);cursor:pointer;box-shadow:0 0 8px rgba(56,189,248,.6)}
+  input[type=range]::-moz-range-thumb{width:15px;height:15px;border:0;border-radius:50%;
+    background:var(--rain);cursor:pointer}
+  .ctl .val{font-size:12px;font-weight:600;color:var(--ink);min-width:30px;text-align:right;font-variant-numeric:tabular-nums}
+
+  .spacer{flex:1}
+  .hint{width:100%;text-align:center;font-size:10.5px;letter-spacing:.04em;
+    color:var(--cue);padding-top:4px}
+  kbd{font-family:"IBM Plex Mono",monospace;background:#16223A;border:1px solid var(--line);
+    border-radius:4px;padding:1px 5px;font-size:10px;color:var(--ink-dim)}
+
+  @media (max-width:560px){
+    .metric.tc{display:none}
+    .controls{gap:8px;padding:10px}
+    button{padding:9px 11px;font-size:12px}
+    .play{min-width:96px}
+    input[type=range]{width:72px}
+    .hint{display:none}
+  }
+</style>
+</head>
+<body class="hide-cues">
+
+  <header class="hud">
+    <div class="brand"><span class="dot"></span> <b>Smability</b> · Teleprompter</div>
+    <div class="hud-spacer"></div>
+    <div class="metric tc"><span class="k">Objetivo</span><span class="v mono">1:50</span></div>
+    <div class="metric est" id="estBox"><span class="k">Duración est.</span><span class="v mono" id="est">–:––</span></div>
+    <div class="metric"><span class="k">Tiempo</span><span class="v mono" id="clock">0:00</span></div>
+  </header>
+
+  <main class="stage">
+    <div class="fade top"></div>
+    <div class="fade bot"></div>
+    <div class="band"></div>
+    <div class="progress" id="prog"></div>
+    <div class="scroll" id="scroll"></div>
+  </main>
+
+  <footer class="controls">
+    <button class="play" id="play">▶  Reproducir</button>
+    <div class="ctl">
+      <label>Velocidad</label>
+      <input type="range" id="speed" min="18" max="140" step="1" />
+      <span class="val mono" id="speedVal">–</span>
+    </div>
+    <div class="ctl">
+      <label>Texto</label>
+      <input type="range" id="size" min="22" max="60" step="1" value="34" />
+      <span class="val mono" id="sizeVal">34</span>
+    </div>
+    <button id="calib" title="Ajusta la velocidad para terminar en ~1:50">⟲ Calibrar 1:50</button>
+    <button id="cues" title="Mostrar/ocultar indicaciones de cámara">◧ Indicaciones</button>
+    <button id="mirror" title="Voltear para vidrio de teleprompter">⇋ Espejo</button>
+    <div class="spacer"></div>
+    <button id="restart">⟲ Reiniciar</button>
+    <button id="full">⛶ Pantalla completa</button>
+    <div class="hint">
+      <kbd>Espacio</kbd> play/pausa · <kbd>↑</kbd><kbd>↓</kbd> velocidad · <kbd>+</kbd><kbd>−</kbd> texto ·
+      <kbd>R</kbd> reiniciar · <kbd>M</kbd> espejo · <kbd>C</kbd> indicaciones · <kbd>F</kbd> pantalla completa
+    </div>
+  </footer>
+
+<script>
+const TARGET = 110; // segundos objetivo (1:50) para dar margen bajo los 2:00
+
+const SCRIPT = [
+  { tc:"0:00 – 0:15", color:"var(--air)",
+    cue:"Tu rostro sobre un mapa de la ciudad o dashboard de contingencias",
+    text:"El cambio climático ya nos está cobrando factura: tormentas más destructivas y aire más tóxico. Las apps tradicionales dan pronósticos genéricos y tardíos. Nosotros te decimos con qué intensidad una tormenta azotará tu calle, o cuándo el aire alcanzará niveles peligrosos para tu salud. Soy Octavio Jiménez, cofundador de Smability." },
+  { tc:"0:15 – 0:40", color:"var(--air)",
+    cue:"Grabación de pantalla con mapas de aire/lluvia + cortes rápidos a los nodos físicos",
+    text:"Resolvemos el problema en la raíz: la generación del dato. Nuestros modelos ingieren toda la información oficial y cubren los puntos ciegos de la ciudad con nuestra propia red de hardware IoT: estaciones SMAA para calidad del aire y CHAAK para precipitación. Hoy ya operamos más de 40 estaciones en 7 ciudades." },
+  { tc:"0:40 – 1:10", color:"var(--rain)",
+    cue:"Consola de AWS Lambda, bloques de código o mapa expandiéndose",
+    text:"Todo este ecosistema vive cien por ciento en la nube de AWS. Con funciones Lambda ejecutamos nuestros modelos de alertamiento propietarios, para aire y para lluvia, y los servimos como APIs robustas que disparan alertas tempranas de alta precisión. Es una arquitectura serverless: escalable y replicable en cualquier ciudad de México o Latinoamérica." },
+  { tc:"1:10 – 1:40", color:"var(--rain)",
+    cue:"Celular en Telegram/WhatsApp: consulta on-demand, alerta push y paywall",
+    text:"Toda esta infraestructura aterriza en el bolsillo de las personas a través de AireGPT. En canales de mensajería masiva entregamos los datos como consultas on-demand gratuitas. Pero el valor real está en las alertas programadas: si el algoritmo detecta peligro, disparamos una alerta push proactiva. Sin fricción, el usuario gratuito se convierte en premium para proteger su salud y su patrimonio." },
+  { tc:"1:40 – 2:00", color:"var(--warn)",
+    cue:"CRM con gráficas B2C y B2B; el mapa salta a Ciudad de Guatemala; tu rostro se agranda",
+    text:"Detrás de escena, nuestro CRM gestiona la base masiva de usuarios B2C y a los clientes B2B cuyo flujo de caja financia hoy nuestra operación. Tenemos tecnología patentada, hardware propio y rentabilidad probada. Y el siguiente paso ya está asegurado: con el grant de EPIC llevamos AireGPT a Ciudad de Guatemala. Con 500 LATAM, lo escalamos a toda la región." },
+];
+
+const scroll = document.getElementById('scroll');
+SCRIPT.forEach(s=>{
+  const b=document.createElement('div'); b.className='block';
+  b.innerHTML =
+    `<span class="tag"><span class="tdot" style="background:${s.color}"></span><time>${s.tc}</time></span>`+
+    `<div class="cue">${s.cue}</div>`+
+    `<div class="line">${s.text}</div>`;
+  scroll.appendChild(b);
+});
+
+// ---------- estado ----------
+const $=id=>document.getElementById(id);
+let playing=false, speed=60, raf=null, last=0, elapsed=0;
+
+const fmt = s => { s=Math.max(0,Math.round(s)); return `${Math.floor(s/60)}:${String(s%60).padStart(2,'0')}`; };
+const maxScroll = () => Math.max(1, scroll.scrollHeight - scroll.clientHeight);
+
+function updateEstimate(){
+  const est = maxScroll() / speed;          // seg para recorrer todo a la velocidad actual
+  $('est').textContent = fmt(est);
+  const box=$('estBox'); box.classList.remove('warn','over');
+  if(est>120) box.classList.add('over');
+  else if(est>TARGET+4) box.classList.add('warn');
+}
+function setSpeed(v){
+  speed=Math.min(140,Math.max(18,v));
+  $('speed').value=speed; $('speedVal').textContent=Math.round(speed);
+  updateEstimate();
+}
+function calibrate(){ setSpeed(maxScroll()/TARGET); }
+
+// ---------- loop ----------
+function tick(t){
+  if(!playing) return;
+  if(!last) last=t;
+  const dt=(t-last)/1000; last=t;
+  elapsed+=dt;
+  scroll.scrollTop += speed*dt;
+  $('clock').textContent=fmt(elapsed);
+  $('prog').style.width=(scroll.scrollTop/maxScroll()*100)+'%';
+  const c=$('clock'); c.style.color = elapsed>120 ? 'var(--alert)' : elapsed>TARGET ? 'var(--warn)' : 'var(--ink)';
+  if(scroll.scrollTop>=maxScroll()-1){ pause(); return; }
+  raf=requestAnimationFrame(tick);
+}
+function play(){ if(playing)return; playing=true; last=0;
+  $('play').innerHTML='❚❚  Pausar'; $('play').classList.add('playing');
+  raf=requestAnimationFrame(tick);
+}
+function pause(){ playing=false; if(raf)cancelAnimationFrame(raf);
+  $('play').innerHTML='▶  Reproducir'; $('play').classList.remove('playing');
+}
+function toggle(){ playing?pause():play(); }
+function restart(){ pause(); scroll.scrollTop=0; elapsed=0;
+  $('clock').textContent='0:00'; $('clock').style.color='var(--ink)'; $('prog').style.width='0%';
+}
+
+// ---------- controles ----------
+$('play').onclick=toggle;
+$('restart').onclick=restart;
+$('calib').onclick=calibrate;
+$('speed').oninput=e=>setSpeed(+e.target.value);
+$('size').oninput=e=>{ document.documentElement.style.setProperty('--fs',e.target.value+'px');
+  $('sizeVal').textContent=e.target.value; updateEstimate(); };
+$('cues').onclick=e=>{ document.body.classList.toggle('hide-cues');
+  e.currentTarget.classList.toggle('on', !document.body.classList.contains('hide-cues')); };
+$('mirror').onclick=e=>{ scroll.classList.toggle('mirror');
+  e.currentTarget.classList.toggle('on', scroll.classList.contains('mirror')); };
+$('full').onclick=()=>{ document.fullscreenElement?document.exitFullscreen():document.documentElement.requestFullscreen(); };
+
+// teclado
+addEventListener('keydown',e=>{
+  const k=e.key.toLowerCase();
+  if(e.code==='Space'){e.preventDefault();toggle();}
+  else if(k==='arrowup'){e.preventDefault();setSpeed(speed+4);}
+  else if(k==='arrowdown'){e.preventDefault();setSpeed(speed-4);}
+  else if(k==='+'||k==='='){const s=Math.min(60,+$('size').value+2);$('size').value=s;$('size').oninput({target:{value:s}});}
+  else if(k==='-'||k==='_'){const s=Math.max(22,+$('size').value-2);$('size').value=s;$('size').oninput({target:{value:s}});}
+  else if(k==='r'){restart();}
+  else if(k==='m'){$('mirror').click();}
+  else if(k==='c'){$('cues').click();}
+  else if(k==='f'){$('full').click();}
+});
+
+// arranque
+addEventListener('resize',updateEstimate);
+window.onload=()=>{ calibrate(); };  // calibra a 1:50 según la pantalla real
+calibrate();
+</script>
+</body>
+</html>
